@@ -78,15 +78,15 @@ if [[ -t 1 ]]; then
 fi
 
 # Only allow script to run as root
-if (( EUID != 0 )); then
-  echo -e "${red}This script needs to be run as root. Try again with 'sudo $0'${nc}"
-  exit 1
-fi
+# if (( EUID != 0 )); then
+#   echo -e "${red}This script needs to be run as root. Try again with 'sudo $0'${nc}"
+#   exit 1
+# fi
 
-mkdir -p /opt/piavpn-manual
+mkdir -p /tmp/piavpn-manual
 # Erase old latencyList file
-rm -f /opt/piavpn-manual/latencyList
-touch /opt/piavpn-manual/latencyList
+rm -f /tmp/piavpn-manual/latencyList
+touch /tmp/piavpn-manual/latencyList
 
 # This allows you to set the maximum allowed latency in seconds.
 # All servers that respond slower than this will be ignored.
@@ -113,17 +113,19 @@ printServerLatency() {
     >&2 echo "Got latency ${time}s for region: $regionName"
     echo "$time $regionID $serverIP"
     # Write a list of servers with acceptable latency
-    # to /opt/piavpn-manual/latencyList
-    echo -e "$time" "$regionID"'\t'"$serverIP"'\t'"$regionName" >> /opt/piavpn-manual/latencyList
+    # to /tmp/piavpn-manual/latencyList
+    echo -e "$time" "$regionID"'\t'"$serverIP"'\t'"$regionName" >> /tmp/piavpn-manual/latencyList
   fi
   # Sort the latencyList, ordered by latency
-  sort -no /opt/piavpn-manual/latencyList /opt/piavpn-manual/latencyList
+  sort -no /tmp/piavpn-manual/latencyList /tmp/piavpn-manual/latencyList
 }
 export -f printServerLatency
 
+selectedOrLowestLatency="selected"
 # If a server location or autoconnect isn't specified, set the variable to false/no.
 if [[ -z $PREFERRED_REGION ]]; then
   PREFERRED_REGION=none
+  selectedOrLowestLatency="lowest latency"
 fi
 if [[ -z $VPN_PROTOCOL ]]; then
   VPN_PROTOCOL=no
@@ -136,48 +138,44 @@ all_region_data=$(curl -s "$serverlist_url" | head -1)
 selectedRegion=$PREFERRED_REGION
 
 # If a server isn't being specified, auto-select the server with the lowest latency
-if [[ $selectedRegion == "none" ]]; then
-  selectedOrLowestLatency="lowest latency"
-  check_all_region_data
+check_all_region_data
 
-  # Making sure this variable doesn't contain some strange string
-  if [[ $PIA_PF != "true" ]]; then
-    PIA_PF="false"
-  fi
+# Making sure this variable doesn't contain some strange string
+if [[ $PIA_PF != "true" ]]; then
+  PIA_PF="false"
+fi
 
-  # Test one server from each region to get the closest region.
-  # If port forwarding is enabled, filter out regions that don't support it.
-  if [[ $PIA_PF == "true" ]]; then
-    echo "Port Forwarding is enabled, non-PF servers excluded."
-    echo
-    summarized_region_data="$( echo "$all_region_data" |
-      jq -r '.regions[] | select(.port_forward==true) |
-      .servers.meta[0].ip+" "+.id+" "+.name+" "+(.geo|tostring)' )"
-  else
-    summarized_region_data="$( echo "$all_region_data" |
-    jq -r '.regions[] |
-    .servers.meta[0].ip+" "+.id+" "+.name+" "+(.geo|tostring)' )"
-  fi
-  echo -e Testing regions that respond \
-    faster than "${green}$MAX_LATENCY${nc}" seconds:
-  selectedRegion="$(echo "$summarized_region_data" |
-    xargs -I{} bash -c 'printServerLatency {}' |
-    sort | head -1 | awk '{ print $2 }')"
+# Test one server from each region to get the closest region.
+# If port forwarding is enabled, filter out regions that don't support it.
+if [[ $PIA_PF == "true" ]]; then
+  echo "Port Forwarding is enabled, non-PF servers excluded."
   echo
-
-  if [[ -z $selectedRegion ]]; then
-    echo -e "${red}No region responded within ${MAX_LATENCY}s, consider using a higher timeout."
-    echo "For example, to wait 1 second for each region, inject MAX_LATENCY=1 like this:"
-    echo -e "$ MAX_LATENCY=1 ./get_region.sh${nc}"
-    exit 1
-  else
-    echo -e "A list of servers and connection details, ordered by latency can be
-found in at : ${green}/opt/piavpn-manual/latencyList${nc}
-"
-  fi
+  summarized_region_data="$( echo "$all_region_data" |
+    jq --arg REGION_ID "$selectedRegion" -r '.regions[] | select(.port_forward==true) | 
+    select(($REGION_ID == "none") or (.id | contains($REGION_ID))) |
+    .servers.meta[0].ip+" "+.id+" "+.name+" "+(.geo|tostring)' )"
 else
-  selectedOrLowestLatency="selected"
-  check_all_region_data
+  summarized_region_data="$( echo "$all_region_data" |
+  jq --arg REGION_ID "$selectedRegion" -r '.regions[] | 
+  select(($REGION_ID == "none") or (.id | contains($REGION_ID))) |
+  .servers.meta[0].ip+" "+.id+" "+.name+" "+(.geo|tostring)' )"
+fi
+echo -e Testing regions that respond \
+  faster than "${green}$MAX_LATENCY${nc}" seconds:
+selectedRegion="$(echo "$summarized_region_data" |
+  xargs -I{} bash -c 'printServerLatency {}' |
+  sort | head -1 | awk '{ print $2 }')"
+echo
+
+if [[ -z $selectedRegion ]]; then
+  echo -e "${red}No region responded within ${MAX_LATENCY}s, consider using a higher timeout."
+  echo "For example, to wait 1 second for each region, inject MAX_LATENCY=1 like this:"
+  echo -e "$ MAX_LATENCY=1 ./get_region.sh${nc}"
+  exit 1
+else
+  echo -e "A list of servers and connection details, ordered by latency can be
+found in at : ${green}/tmp/piavpn-manual/latencyList${nc}
+"
 fi
 
 get_selected_region_data
@@ -223,9 +221,9 @@ if [[ -z $PIA_TOKEN ]]; then
     exit 0
   fi
   ./get_token.sh
-  PIA_TOKEN=$( awk 'NR == 1' /opt/piavpn-manual/token )
+  PIA_TOKEN=$( awk 'NR == 1' /tmp/piavpn-manual/token )
   export PIA_TOKEN
-  rm -f /opt/piavpn-manual/token
+  rm -f /tmp/piavpn-manual/token
 else
   echo -e "Using existing token ${green}$PIA_TOKEN${nc}."
   echo
@@ -242,7 +240,7 @@ if [[ $VPN_PROTOCOL == "wireguard" ]]; then
   echo
   PIA_PF=$PIA_PF PIA_TOKEN=$PIA_TOKEN WG_SERVER_IP=$bestServer_WG_IP \
     WG_HOSTNAME=$bestServer_WG_hostname ./connect_to_wireguard_with_token.sh
-  rm -f /opt/piavpn-manual/latencyList
+  rm -f /tmp/piavpn-manual/latencyList
   exit 0
 fi
 
@@ -268,6 +266,6 @@ if [[ $VPN_PROTOCOL == openvpn* ]]; then
     OVPN_HOSTNAME=$serverHostname \
     CONNECTION_SETTINGS=$VPN_PROTOCOL \
     ./connect_to_openvpn_with_token.sh
-  rm -f /opt/piavpn-manual/latencyList
+  rm -f /tmp/piavpn-manual/latencyList
   exit 0
 fi

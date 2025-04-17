@@ -53,12 +53,12 @@ if [[ -t 1 ]]; then
 fi
 
 # Only allow script to run as root
-if (( EUID != 0 )); then
-  echo -e "${red}This script needs to be run as root. Try again with 'sudo $0'${nc}"
-  exit 1
-fi
+# if (( EUID != 0 )); then
+  # echo -e "${red}This script needs to be run as root. Try again with 'sudo $0'${nc}"
+  # exit 1
+# fi
 
-mkdir -p /opt/piavpn-manual
+mkdir -p /tmp/piavpn-manual
 
 if [[ -z $PIA_USER || -z $PIA_PASS ]]; then
   echo "If you want this script to automatically get a token from the Meta"
@@ -86,7 +86,7 @@ echo -e "${green}OK!"
 echo
 token=$(echo "$generateTokenResponse" | jq -r '.token')
 tokenExpiration=$(timeout_timestamp)
-tokenLocation=/opt/piavpn-manual/token
+tokenLocation=/tmp/piavpn-manual/token
 echo -e "PIA_TOKEN=$token${nc}"
 echo "$token" > "$tokenLocation" || exit 1
 echo "$tokenExpiration" >> "$tokenLocation"
